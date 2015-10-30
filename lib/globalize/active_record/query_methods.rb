@@ -13,9 +13,7 @@ module Globalize
       end
 
       def where(opts = :chain, *rest)
-        if block_given?
-          super
-        elsif opts == :chain
+        if ((opts == :chain) and (not block_given?))
           scope = spawn
           scope.extend(Squeel::Adapters::ActiveRecord::RelationExtensions::WhereChainCompatibility) if const_defined?(:Squeel)
           WhereChain.new(scope)
