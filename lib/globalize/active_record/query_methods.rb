@@ -14,7 +14,9 @@ module Globalize
 
       def where(opts = :chain, *rest)
         if opts == :chain
-          WhereChain.new(spawn)
+          scope = spawn
+          scope.extend(Squeel::Adapters::ActiveRecord::RelationExtensions::WhereChainCompatibility) if const_defined?(:Squeel)
+          WhereChain.new(scope)
         elsif parsed = parse_translated_conditions(opts)
           join_translations(super(parsed, *rest))
         else
