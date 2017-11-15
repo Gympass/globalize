@@ -139,9 +139,9 @@ class TranslatedAttributesQueryTest < MiniTest::Spec
     end
 
     it 'handles nil case' do
-      assert_equal nil, Post.where(:title => 'foo').first
-      assert_equal nil, Post.where(:title => 'foo').last
-      assert_equal nil, Post.where(:title => 'foo').take
+      assert_nil Post.where(:title => 'foo').first
+      assert_nil Post.where(:title => 'foo').last
+      assert_nil Post.where(:title => 'foo').take
     end
 
     describe '.first' do
@@ -185,12 +185,24 @@ class TranslatedAttributesQueryTest < MiniTest::Spec
         describe 'for translated columns' do
           it 'returns record in order, column as symbol' do
             @order = Post.where(:title => 'title').order(:title)
-            assert_equal ['post_translations.title'], @order.order_values
+
+            case Globalize::Test::Database.driver
+            when 'mysql'
+              assert_match(/ORDER BY `post_translations`.`title` ASC/, @order.to_sql)
+            else
+              assert_match(/ORDER BY "post_translations"."title" ASC/, @order.to_sql)
+            end
           end
 
           it 'returns record in order, column and direction as hash' do
             @order = Post.where(:title => 'title').order(title: :desc)
-            assert_match(/ORDER BY "post_translations"."title" DESC/, @order.to_sql)
+
+            case Globalize::Test::Database.driver
+            when 'mysql'
+              assert_match(/ORDER BY `post_translations`.`title` DESC/, @order.to_sql)
+            else
+              assert_match(/ORDER BY "post_translations"."title" DESC/, @order.to_sql)
+            end
           end
 
           it 'returns record in order, leaving string untouched' do
@@ -212,12 +224,24 @@ class TranslatedAttributesQueryTest < MiniTest::Spec
         describe 'for non-translated columns' do
           it 'returns record in order, column as symbol' do
             @order = Post.where(:title => 'title').order(:id)
-            assert_match(/ORDER BY "posts"."id" ASC/, @order.to_sql)
+
+            case Globalize::Test::Database.driver
+            when 'mysql'
+              assert_match(/ORDER BY `posts`.`id` ASC/, @order.to_sql)
+            else
+              assert_match(/ORDER BY "posts"."id" ASC/, @order.to_sql)
+            end
           end
 
           it 'returns record in order, column and direction as hash' do
             @order = Post.where(:title => 'title').order(id: :desc)
-            assert_match(/ORDER BY "posts"."id" DESC/, @order.to_sql)
+
+            case Globalize::Test::Database.driver
+            when 'mysql'
+              assert_match(/ORDER BY `posts`.`id` DESC/, @order.to_sql)
+            else
+              assert_match(/ORDER BY "posts"."id" DESC/, @order.to_sql)
+            end
           end
 
           it 'returns record in order, leaving string untouched' do
@@ -239,8 +263,15 @@ class TranslatedAttributesQueryTest < MiniTest::Spec
         describe 'for mixed columns' do
           it 'returns record in order, column and direction as hash' do
             @order = Post.where(:title => 'title').order(title: :desc, id: :asc)
-            assert_match(/ORDER BY "post_translations"."title" DESC/, @order.to_sql)
-            assert_match(/"id" ASC/, @order.to_sql)
+
+            case Globalize::Test::Database.driver
+            when 'mysql'
+              assert_match(/ORDER BY `post_translations`.`title` DESC/, @order.to_sql)
+              assert_match(/`id` ASC/, @order.to_sql)
+            else
+              assert_match(/ORDER BY "post_translations"."title" DESC/, @order.to_sql)
+              assert_match(/"id" ASC/, @order.to_sql)
+            end
           end
 
           it 'returns record in order, leaving string untouched' do
@@ -302,7 +333,7 @@ class TranslatedAttributesQueryTest < MiniTest::Spec
 
       # find_by
       assert_equal post, Post.find_by(:title  => 'タイトル')
-      assert_equal nil, Post.find_by(:title => 'titre')
+      assert_nil Post.find_by(:title => 'titre')
 
       # exists
       assert Post.exists?(:title => 'タイトル')
@@ -337,6 +368,12 @@ class TranslatedAttributesQueryTest < MiniTest::Spec
       attachment = post.attachments.create(file_type: "image")
       assert_equal attachment, post.attachments.where(file_type: "image").first
       assert_equal attachment, blog.attachments.where(file_type: "image").first
+    end
+
+    it 'creates record from relation' do
+      post = Post.create(:title => "title")
+      post.translated_comments.where(content: "content").create
+      assert_equal 1, Comment.count
     end
   end
 end

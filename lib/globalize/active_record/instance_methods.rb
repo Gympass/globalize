@@ -11,48 +11,46 @@ module Globalize
         super.merge(translated_attributes)
       end
 
-      def attributes=(attributes, *args)
-        with_given_locale(attributes) { super }
+      def attributes=(new_attributes, *options)
+        super unless new_attributes.respond_to?(:stringify_keys) && new_attributes.present?
+        attributes = new_attributes.stringify_keys
+        with_given_locale(attributes) { super(attributes.except("locale"), *options) }
       end
 
-      def assign_attributes(attributes, *args)
-        with_given_locale(attributes) { super }
+      def assign_attributes(new_attributes, *options)
+        super unless new_attributes.respond_to?(:stringify_keys) && new_attributes.present?
+        attributes = new_attributes.stringify_keys
+        with_given_locale(attributes) { super(attributes.except("locale"), *options) }
       end
 
-      def write_attribute(name, value, options = {})
-        return super(name, value) unless translated?(name)
+      def write_attribute(name, value, *args, &block)
+        return super(name, value, *args, &block) unless translated?(name)
 
-        options = {:locale => Globalize.locale}.merge(options)
-
-        # Dirty tracking, paraphrased from
-        # ActiveRecord::AttributeMethods::Dirty#write_attribute.
-        name_str = name.to_s
-        if attribute_changed?(name_str)
-          # If there's already a change, delete it if this undoes the change.
-          old = changed_attributes[name_str]
-          @changed_attributes.delete(name_str) if value == old
-        else
-          # If there's not a change yet, record it.
-          old = globalize.fetch(options[:locale], name)
-          old = old.dup if old.duplicable?
-          @changed_attributes[name_str] = old if value != old
-        end
+        options = {:locale => Globalize.locale}.merge(args.first || {})
 
         globalize.write(options[:locale], name, value)
       end
 
-      def read_attribute(name, options = {})
+      def [](attr_name)
+        if translated?(attr_name)
+          read_attribute(attr_name)
+        else
+          read_attribute(attr_name) { |n| missing_attribute(n, caller) }
+        end
+      end
+
+      def read_attribute(name, options = {}, &block)
         options = {:translated => true, :locale => nil}.merge(options)
-        return super(name) unless options[:translated]
+        return super(name, &block) unless options[:translated]
 
         if translated?(name)
-          if (value = globalize.fetch(options[:locale] || Globalize.locale, name))
+          if !(value = globalize.fetch(options[:locale] || Globalize.locale, name)).nil?
             value
           else
-            super(name)
+            super(name, &block)
           end
         else
-          super(name)
+          super(name, &block)
         end
       end
 
@@ -83,8 +81,9 @@ module Globalize
 
           options[locale].each do |key, value|
             translation.send :"#{key}=", value
+            translation.globalized_model.send :"#{key}=", value
           end
-          translation.save
+          translation.save if persisted?
         end
         globalize.reset
       end
@@ -143,16 +142,17 @@ module Globalize
         Globalize.fallbacks(locale)
       end
 
-      def rollback
-        translation_caches[::Globalize.locale] = translation.previous_version
-      end
-
       def save(*)
-        Globalize.with_locale(translation.locale || I18n.default_locale) do
+        result = Globalize.with_locale(translation.locale || I18n.default_locale) do
           without_fallbacks do
             super
           end
         end
+        if result
+          globalize.clear_dirty
+        end
+
+        result
       end
 
       def column_for_attribute name
@@ -163,6 +163,16 @@ module Globalize
 
       def cache_key
         [super, translation.cache_key].join("/")
+      end
+
+      def changed?
+        changed_attributes.present? || translations.any?(&:changed?)
+      end
+
+      # need to access instance variable directly since changed_attributes
+      # is frozen as of Rails 4.2
+      def original_changed_attributes
+        @changed_attributes
       end
 
     protected
@@ -186,10 +196,10 @@ module Globalize
         translation_caches.clear
       end
 
-      def with_given_locale(attributes, &block)
-        attributes.symbolize_keys! if attributes.respond_to?(:symbolize_keys!)
+      def with_given_locale(_attributes, &block)
+        attributes = _attributes.stringify_keys
 
-        if locale = attributes.try(:delete, :locale)
+        if locale = attributes.try(:delete, "locale")
           Globalize.with_locale(locale, &block)
         else
           yield
@@ -203,7 +213,6 @@ module Globalize
       ensure
         self.fallbacks_for_empty_translations = before
       end
-
     end
   end
 end

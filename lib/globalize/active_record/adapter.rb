@@ -3,7 +3,7 @@ module Globalize
     class Adapter
       # The cache caches attributes that already were looked up for read access.
       # The stash keeps track of new or changed values that need to be saved.
-      attr_accessor :record, :stash, :translations
+      attr_accessor :record, :stash
       private :record=, :stash=
 
       delegate :translation_class, :to => :'record.class'
@@ -34,7 +34,9 @@ module Globalize
       end
 
       def save_translations!
-        stash.reject {|locale, attrs| attrs.empty?}.each do |locale, attrs|
+        stash.each do |locale, attrs|
+          next if attrs.empty?
+
           translation = record.translations_by_locale[locale] ||
                         record.translations.build(locale: locale.to_s)
           attrs.each do |name, value|
@@ -68,7 +70,11 @@ module Globalize
 
       def fetch_attribute(locale, name)
         translation = record.translation_for(locale, false)
-        return translation && translation.send(name)
+        if translation
+          translation.send(name)
+        else
+          record.class.translation_class.new.send(name)
+        end
       end
 
       def set_metadata(object, metadata)
@@ -87,6 +93,7 @@ module Globalize
       end
 
       delegate :fallbacks_for_empty_translations?, :to => :record, :prefix => false
+      prepend AdapterDirty
     end
   end
 end

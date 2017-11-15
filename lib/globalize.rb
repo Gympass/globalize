@@ -2,6 +2,7 @@ require 'request_store'
 require 'active_record'
 require 'patches/active_record/xml_attribute_serializer'
 require 'patches/active_record/query_method'
+require 'patches/active_record/relation'
 require 'patches/active_record/serialization'
 require 'patches/active_record/uniqueness_validator'
 require 'patches/active_record/persistence'
@@ -83,7 +84,7 @@ module Globalize
   end
 end
 
-ActiveRecord::Base.mattr_accessor :globalize_serialized_attributes, instance_writer: false
+ActiveRecord::Base.class_attribute :globalize_serialized_attributes, instance_writer: false
 ActiveRecord::Base.globalize_serialized_attributes = {}
 
 ActiveRecord::Base.extend(Globalize::ActiveRecord::ActMacro)

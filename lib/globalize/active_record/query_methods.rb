@@ -1,10 +1,9 @@
 module Globalize
   module ActiveRecord
     module QueryMethods
-
       class WhereChain < ::ActiveRecord::QueryMethods::WhereChain
         def not(opts, *rest)
-          if parsed = @scope.parse_translated_conditions(opts)
+          if parsed = @scope.clone.parse_translated_conditions(opts)
             @scope.join_translations.where.not(parsed, *rest)
           else
             super
@@ -52,19 +51,21 @@ module Globalize
         end
       end
 
-      def where_values_hash(*args)
-        return super unless respond_to?(:translations_table_name)
-        equalities = respond_to?(:with_default_scope) ? with_default_scope.where_values : where_values
-        equalities = equalities.grep(Arel::Nodes::Equality).find_all { |node|
-          node.left.relation.name == translations_table_name
-        }
+      if ::ActiveRecord::VERSION::STRING < "5.0.0"
+        def where_values_hash(*args)
+          return super unless respond_to?(:translations_table_name)
+          equalities = respond_to?(:with_default_scope) ? with_default_scope.where_values : where_values
+          equalities = equalities.grep(Arel::Nodes::Equality).find_all { |node|
+            node.left.relation.name == translations_table_name
+          }
 
-        binds = Hash[bind_values.find_all(&:first).map { |column, v| [column.name, v] }]
+          binds = Hash[bind_values.find_all(&:first).map { |column, v| [column.name, v] }]
 
-        super.merge(Hash[equalities.map { |where|
-          name = where.left.name
-          [name, binds.fetch(name.to_s) { right = where.right; right.is_a?(Arel::Nodes::Casted) ? right.val : right }]
-        }])
+          super.merge(Hash[equalities.map { |where|
+            name = where.left.name
+            [name, binds.fetch(name.to_s) { right = where.right; right.is_a?(Arel::Nodes::Casted) ? right.val : right }]
+          }])
+        end
       end
 
       def join_translations(relation = self)
@@ -77,16 +78,40 @@ module Globalize
 
       private
 
+      def arel_translated_order_node(column, direction)
+        unless translated_column?(column)
+          return self.arel_table[column].send(direction)
+        end
+
+        full_column = translated_column_name(column)
+
+        # Inject `full_column` to the select values to avoid
+        # PG::InvalidColumnReference errors with distinct queries on Postgres
+        if select_values.empty?
+          self.select_values = [self.arel_table[Arel.star], full_column]
+        else
+          self.select_values << full_column
+        end
+
+        translation_class.arel_table[column].send(direction)
+      end
+
       def parse_translated_order(opts)
         case opts
         when Hash
+          # Do not process nothing unless there is at least a translated column
+          # so that the `order` statement will be processed by the original
+          # ActiveRecord method
+          return nil unless opts.find { |col, dir| translated_column?(col) }
+
+          # Build order arel nodes for translateds and untranslateds statements
           ordering = opts.map do |column, direction|
-            klass = translated_column?(column) ? translation_class : self
-            klass.arel_table[column].send(direction)
+            arel_translated_order_node(column, direction)
           end
+
           order(ordering).order_values
         when Symbol
-          translated_column_name(opts) if translated_attribute_names.include?(opts)
+          parse_translated_order({ opts => :asc })
         else # failsafe returns nothing
           nil
         end
